@@ -60,7 +60,7 @@ server <- function(input, output, session) {
   data <- reactive({
     out <- uploaded_data()
     req(out)
-    out |> 
+    out %>%
       mutate(
         datetime = as.POSIXct(datetime, format = "%Y-%m-%d %H:%M:%S"),
         value = as.numeric(value)
