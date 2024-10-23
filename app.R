@@ -83,7 +83,10 @@ server <- function(input, output, session) {
       marker = list(size = 8)
     ) %>%
       layout(
-        xaxis = list(title = NA),
+        xaxis = list(
+          title = NA,
+          rangeslider = list(type = "data")
+        ),
         dragmode = 'select',  # Enable selection with mouse drag
         clickmode = 'event+select'
       )
@@ -139,13 +142,40 @@ server <- function(input, output, session) {
     selected_points()
   })
   
+  # Filter data
+  filtered_data <- reactive({
+    if (nrow(selected_points()) == 0) { return(data()) }
+    
+    df <- anti_join(data(), selected_points(), by = "datetime")
+    return(df)
+  })
+  
+  # Update graph
+  observe({
+    plotly::plotlyProxy("timeSeriesPlot", session) %>%
+      plotly::plotlyProxyInvoke(
+        method = "deleteTraces",
+        0
+      ) %>%
+      plotly::plotlyProxyInvoke(
+        method = "addTraces",
+        list(
+          x = filtered_data()$datetime, 
+          y = filtered_data()$value, 
+          type = 'scatter', 
+          mode = 'lines+markers',
+          marker = list(size = 8, color = "red")
+        )
+      )
+  }) %>%
+    bindEvent(selected_points())
+  
   # Download filtered data
   output$downloadData <- downloadHandler(
     filename = function() { "filtered_time_series.csv" },
     content = function(file) {
       req(data())  # Ensure data is loaded before exporting
-      filtered_data <- anti_join(data(), selected_points(), by = "datetime")
-      write.csv(filtered_data, file, row.names = FALSE)
+      write.csv(filtered_data(), file, row.names = FALSE)
     }
   )
   
