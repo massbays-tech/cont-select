@@ -1,6 +1,7 @@
 # app.R
 library(shiny)
 library(plotly)
+library(reactable)
 library(dplyr)
 library(readr)
 
@@ -24,29 +25,31 @@ generate_sample_data <- function(n = 300, phi = 0.8, meanlog = 0, sdlog = 0.2) {
 
 # UI
 ui <- fluidPage(
-  titlePanel("Interactive Time Series Plot with CSV Upload and Selection Tools"),
+  titlePanel(h1("Interactive Time Series Plot with CSV Upload and Selection Tools")),
   
   sidebarLayout(
     sidebarPanel(
-      h4("Download sample data to upload"),
+      h2("Download sample data to upload"),
       downloadButton("downloadSample", "Download", class = "btn-info"),
       hr(),
       
-      h4("Upload CSV"),
+      h2("Upload CSV"),
       fileInput("file_upload", "Upload CSV File", accept = c(".csv")),
       actionButton("clear_dataset", "Clear Uploaded Dataset", class = "btn-secondary"),
       
-      h4("Manage Selections"),
+      h2("Manage Selections"),
       actionButton("clear_all", "Clear All Selections", class = "btn-danger"),
       actionButton("undo_last", "Remove Last Selected Point", class = "btn-warning"),
       downloadButton("downloadData", "Download Filtered Data"),
       
-      h4("Selected Points:"),
-      verbatimTextOutput("clicked_points")
+      h2("Debugging:"),
+      htmlOutput("bug_tracking")
     ),
     
     mainPanel(
-      plotlyOutput("timeSeriesPlot")
+      plotlyOutput("timeSeriesPlot"),
+      h2("Selected Points"),
+      reactable::reactableOutput("clicked_points")
     )
   )
 )
@@ -54,7 +57,7 @@ ui <- fluidPage(
 # Server
 server <- function(input, output, session) {
   # Reactive value to store either uploaded or cleared data
-  uploaded_data <- reactiveVal(NULL)  # Store uploaded data (if any)
+  uploaded_data <- reactiveVal(generate_sample_data())  # Store uploaded data (if any)
   
   # Reactive data to use in the plot (uploaded or empty)
   data <- reactive({
@@ -138,37 +141,50 @@ server <- function(input, output, session) {
   })
   
   # Display selected points
-  output$clicked_points <- renderPrint({
-    selected_points()
+  output$clicked_points <- reactable::renderReactable({
+    reactable::reactable(selected_points())
   })
   
   # Filter data
   filtered_data <- reactive({
-    if (nrow(selected_points()) == 0) { return(data()) }
-    
-    df <- anti_join(data(), selected_points(), by = "datetime")
-    return(df)
+    anti_join(data(), selected_points(), by = "datetime")
   })
   
-  # Update graph
-  observe({
-    plotly::plotlyProxy("timeSeriesPlot", session) %>%
-      plotly::plotlyProxyInvoke(
-        method = "deleteTraces",
-        0
-      ) %>%
-      plotly::plotlyProxyInvoke(
-        method = "addTraces",
-        list(
-          x = filtered_data()$datetime, 
-          y = filtered_data()$value, 
-          type = 'scatter', 
-          mode = 'lines+markers',
-          marker = list(size = 8, color = "red")
-        )
+  bugged_points <- reactive({
+    nrow(filtered_data()) + nrow(selected_points()) - nrow(data())
+  })
+  
+  # Bug Check
+  output$bug_tracking <- renderUI({
+    HTML(
+      paste0(
+        "<b>Selected Points (Correct):</b> ", 
+        (nrow(selected_points()) - bugged_points()), 
+        "<br><b>Selected Points (Bugged)</b>: ", bugged_points(),
+        "<br><b>Filtered Points:</b> ", nrow(filtered_data())
       )
-  }) %>%
-    bindEvent(selected_points())
+    )
+  })
+  
+  # # Update graph
+  # observe({
+  #   plotly::plotlyProxy("timeSeriesPlot", session) %>%
+  #     plotly::plotlyProxyInvoke(
+  #       method = "deleteTraces",
+  #       0
+  #     ) %>%
+  #     plotly::plotlyProxyInvoke(
+  #       method = "addTraces",
+  #       list(
+  #         x = filtered_data()$datetime, 
+  #         y = filtered_data()$value, 
+  #         type = 'scatter', 
+  #         mode = 'lines+markers',
+  #         marker = list(size = 8, color = "red")
+  #       )
+  #     )
+  # }) %>%
+  #   bindEvent(selected_points())
   
   # Download filtered data
   output$downloadData <- downloadHandler(
