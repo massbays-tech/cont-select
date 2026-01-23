@@ -3,6 +3,7 @@ library(shiny)
 library(plotly)
 library(dplyr)
 library(readr)
+library(lubridate)
 
 # Sample data for download
 generate_sample_data <- function(n = 300, phi = 0.8, meanlog = 0, sdlog = 0.2) {
@@ -62,20 +63,26 @@ server <- function(input, output, session) {
     req(out)
     out %>%
       mutate(
-        datetime = as.POSIXct(datetime, format = "%Y-%m-%d %H:%M:%S"),
+        datetime = as.POSIXct(datetime, format = "%Y-%m-%d %H:%M:%S", tz = 'EST'),
         value = as.numeric(value)
       )
   })
   
   # Store selected points
-  selected_points <- reactiveVal(data.frame(datetime = as.POSIXct(character()), value = numeric()))
+  selected_points <- reactiveVal(data.frame(datetime = as.POSIXct(character(), tz = "EST"), value = numeric()))
+  
+  # Filtered data excluding selected points
+  filtered_data <- reactive({
+    req(data())
+    anti_join(data(), selected_points(), by = "datetime")
+  })
   
   # Render Plotly time series plot when data is available
   output$timeSeriesPlot <- renderPlotly({
-    req(data())  # Ensure data exists before plotting
+    req(filtered_data())  # Use filtered data instead of original data
     
     plot_ly(
-      data = data(), 
+      data = filtered_data(), 
       x = ~datetime, 
       y = ~value, 
       type = 'scatter', 
@@ -100,24 +107,15 @@ server <- function(input, output, session) {
     selected_points(data.frame(datetime = as.POSIXct(character()), value = numeric()))
   })
   
-  # Handle box/lasso selection
+  # Handle selection
   observeEvent(event_data("plotly_selected"), {
     selection <- event_data("plotly_selected")
     if (!is.null(selection)) {
-      new_points <- data.frame(datetime = as.POSIXct(selection$x), value = selection$y)
+      new_points <- data.frame(datetime = parse_date_time(selection$x, orders = c("ymd HM", "ymd"), tz = "EST"), value = selection$y)
       updated_points <- bind_rows(selected_points(), new_points) %>%
         distinct()  # Avoid duplicates
       selected_points(updated_points)
     }
-  })
-  
-  # Handle single point click
-  observeEvent(event_data("plotly_click"), {
-    click <- event_data("plotly_click")
-    new_point <- data.frame(datetime = as.POSIXct(click$x), value = click$y)
-    updated_points <- bind_rows(selected_points(), new_point) %>%
-      distinct()  # Avoid duplicates
-    selected_points(updated_points)
   })
   
   # Clear all selected points
@@ -143,9 +141,8 @@ server <- function(input, output, session) {
   output$downloadData <- downloadHandler(
     filename = function() { "filtered_time_series.csv" },
     content = function(file) {
-      req(data())  # Ensure data is loaded before exporting
-      filtered_data <- anti_join(data(), selected_points(), by = "datetime")
-      write.csv(filtered_data, file, row.names = FALSE)
+      req(filtered_data())  # Use filtered data
+      write.csv(filtered_data(), file, row.names = FALSE)
     }
   )
   
